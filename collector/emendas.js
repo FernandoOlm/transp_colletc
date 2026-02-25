@@ -1,5 +1,5 @@
 // =====================================================
-// INÍCIO — COLETOR DE EMENDAS (SIGA BRASIL)
+// INÍCIO — COLETOR DE EMENDAS (SIGA — POST OFICIAL)
 // =====================================================
 
 import fs from "fs";
@@ -18,11 +18,37 @@ function limparNome(nome) {
     .trim();
 }
 
+async function buscarEmendasAno(ano) {
+  const xmlBody = `
+    <Emendas>
+      <Ano>${ano}</Ano>
+    </Emendas>
+  `;
+
+  const url = "https://legis.senado.leg.br/dadosabertos/dados/ConsultarEmendas";
+
+  try {
+    const xml = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/xml",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)",
+      },
+      body: xmlBody,
+    }).then((r) => r.text());
+
+    return xml;
+  } catch (e) {
+    console.log("❌ Erro ao consultar SIGA:", e.message);
+    return null;
+  }
+}
+
 export async function coletarEmendas(anos) {
   console.clear();
-  console.log("🟩 Iniciando coleta de EMENDAS via SIGA Brasil...\n");
+  console.log("🟩 Iniciando coleta de EMENDAS via SIGA (POST)...\n");
 
-  // Carregar lista de deputados
+  // Carregar deputados
   const listaPath =
     "/home/folmdelima/transp_colletc/cache/deputados/lista.json";
 
@@ -33,28 +59,22 @@ export async function coletarEmendas(anos) {
 
   const deputados = JSON.parse(fs.readFileSync(listaPath));
 
-  // índice para lookup rápido por nome
-  const mapaNomes = {};
+  const nomes = {};
   for (const d of deputados) {
-    mapaNomes[limparNome(d.nomeCivil)] = d.id;
-    mapaNomes[limparNome(d.nomeEleitoral)] = d.id;
+    nomes[limparNome(d.nomeCivil)] = d.id;
+    nomes[limparNome(d.nomeEleitoral)] = d.id;
   }
 
   for (const ano of anos) {
-    console.log(`📘 Baixando XML de EMENDAS ${ano} do SIGA Brasil...`);
+    console.log(`📘 Coletando EMENDAS ${ano}...`);
 
-    const url = `https://legis.senado.leg.br/dadosabertos/emendas/ano/${ano}`;
-
-    let xml = "";
-    try {
-      xml = await fetch(url).then((r) => r.text());
-    } catch (e) {
-      console.log(`❌ Erro baixando XML ${ano}:`, e.message);
+    const xml = await buscarEmendasAno(ano);
+    if (!xml) {
+      console.log(`❌ Falha ao buscar ano ${ano}`);
       continue;
     }
 
     const $ = cheerio.load(xml, { xmlMode: true });
-
     const resultadoAno = {};
 
     $("Emenda").each((_, el) => {
@@ -63,20 +83,18 @@ export async function coletarEmendas(anos) {
       const autor = limparNome(em.find("Autor").text().trim());
       if (!autor) return;
 
-      const depId = mapaNomes[autor];
-      if (!depId) return; // autor não é deputado federal atual
+      const depId = nomes[autor];
+      if (!depId) return;
 
       if (!resultadoAno[depId]) resultadoAno[depId] = [];
 
       resultadoAno[depId].push({
         numero: em.find("Numero").text().trim(),
-        autor: em.find("Autor").text().trim(),
         tipo: em.find("Tipo").text().trim(),
-        uf: em.find("UF").text().trim(),
-        partido: em.find("Partido").text().trim(),
-        programa: em.find("Programa").text().trim(),
+        autor: em.find("Autor").text().trim(),
         funcao: em.find("Funcao").text().trim(),
         subfuncao: em.find("Subfuncao").text().trim(),
+        programa: em.find("Programa").text().trim(),
         localidade: em.find("Localidade").text().trim(),
         valorAutorizado: em.find("ValorAutorizado").text().trim(),
         valorEmpenhado: em.find("ValorEmpenhado").text().trim(),
@@ -85,20 +103,19 @@ export async function coletarEmendas(anos) {
     });
 
     // salvar
-    if (!fs.existsSync(BASE_PATH))
-      fs.mkdirSync(BASE_PATH, { recursive: true });
+    if (!fs.existsSync(BASE_PATH)) fs.mkdirSync(BASE_PATH, { recursive: true });
 
     fs.writeFileSync(
       `${BASE_PATH}${ano}.json`,
       JSON.stringify(resultadoAno, null, 2)
     );
 
-    console.log(`✅ EMENDAS ${ano} salvas: ${BASE_PATH}${ano}.json\n`);
+    console.log(`✅ EMENDAS ${ano} salvas.\n`);
   }
 
-  console.log("🟩 Coleta SIGA Brasil finalizada.\n");
+  console.log("🟩 Coleta finalizada.\n");
 }
 
 // =====================================================
-// FIM — COLETOR DE EMENDAS (SIGA BRASIL)
+// FIM — COLETOR DE EMENDAS (SIGA — POST)
 // =====================================================
