@@ -1,13 +1,20 @@
 // =====================================================
-// INÍCIO — COLETOR DE EMENDAS (SIGA — POST OFICIAL)
+// INÍCIO — COLETOR DE EMENDAS (PORTAL DA TRANSPARÊNCIA)
+// MODELO C — MEGADATABASE
 // =====================================================
 
 import fs from "fs";
 import fetch from "node-fetch";
-import * as cheerio from "cheerio";
 
 const BASE_PATH = "/home/folmdelima/transp_colletc/cache/emendas/";
+const BIG_DB_PATH = BASE_PATH + "big.json";
 
+// SUA CHAVE
+const API_KEY = "f1e803bfc246b07e5bc099180d650815";
+
+// -----------------------------------------------------
+// Função util para limpar nomes
+// -----------------------------------------------------
 function limparNome(nome) {
   return nome
     .toUpperCase()
@@ -18,104 +25,102 @@ function limparNome(nome) {
     .trim();
 }
 
-async function buscarEmendasAno(ano) {
-  const xmlBody = `
-    <Emendas>
-      <Ano>${ano}</Ano>
-    </Emendas>
-  `;
+// -----------------------------------------------------
+// Função: buscar uma página da API
+// -----------------------------------------------------
+async function buscarPagina(ano, pagina, nomeAutor) {
+  const params = new URLSearchParams({
+    ano: ano.toString(),
+    pagina: pagina.toString(),
+    nomeAutor: nomeAutor
+  });
 
-  const url = "https://legis.senado.leg.br/dadosabertos/dados/ConsultarEmendas";
+  const url = `https://api.portaldatransparencia.gov.br/api-de-dados/emendas?${params}`;
 
   try {
-    const xml = await fetch(url, {
-      method: "POST",
+    const json = await fetch(url, {
       headers: {
-        "Content-Type": "application/xml",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)",
-      },
-      body: xmlBody,
-    }).then((r) => r.text());
+        "Accept": "application/json",
+        "chave-api-dados": API_KEY
+      }
+    }).then(r => r.json());
 
-    return xml;
+    return Array.isArray(json) ? json : [];
   } catch (e) {
-    console.log("❌ Erro ao consultar SIGA:", e.message);
-    return null;
+    console.log("❌ Erro na página:", e.message);
+    return [];
   }
 }
 
+// -----------------------------------------------------
+// INÍCIO — COLETAR EMENDAS (MODELO C)
+// -----------------------------------------------------
 export async function coletarEmendas(anos) {
   console.clear();
-  console.log("🟩 Iniciando coleta de EMENDAS via SIGA (POST)...\n");
+  console.log("🟩 Coletando EMENDAS (Portal da Transparência) — MODELO C...\n");
 
   // Carregar deputados
-  const listaPath =
-    "/home/folmdelima/transp_colletc/cache/deputados/lista.json";
+  const depPath = "/home/folmdelima/transp_colletc/cache/deputados/lista.json";
+  const deputados = JSON.parse(fs.readFileSync(depPath));
 
-  if (!fs.existsSync(listaPath)) {
-    console.log("❌ Rode 'Atualizar Deputados' primeiro.");
-    return;
-  }
-
-  const deputados = JSON.parse(fs.readFileSync(listaPath));
-
+  // Mapa para lookup rápido
   const nomes = {};
   for (const d of deputados) {
     nomes[limparNome(d.nomeCivil)] = d.id;
     nomes[limparNome(d.nomeEleitoral)] = d.id;
   }
 
-  for (const ano of anos) {
-    console.log(`📘 Coletando EMENDAS ${ano}...`);
-
-    const xml = await buscarEmendasAno(ano);
-    if (!xml) {
-      console.log(`❌ Falha ao buscar ano ${ano}`);
-      continue;
-    }
-
-    const $ = cheerio.load(xml, { xmlMode: true });
-    const resultadoAno = {};
-
-    $("Emenda").each((_, el) => {
-      const em = $(el);
-
-      const autor = limparNome(em.find("Autor").text().trim());
-      if (!autor) return;
-
-      const depId = nomes[autor];
-      if (!depId) return;
-
-      if (!resultadoAno[depId]) resultadoAno[depId] = [];
-
-      resultadoAno[depId].push({
-        numero: em.find("Numero").text().trim(),
-        tipo: em.find("Tipo").text().trim(),
-        autor: em.find("Autor").text().trim(),
-        funcao: em.find("Funcao").text().trim(),
-        subfuncao: em.find("Subfuncao").text().trim(),
-        programa: em.find("Programa").text().trim(),
-        localidade: em.find("Localidade").text().trim(),
-        valorAutorizado: em.find("ValorAutorizado").text().trim(),
-        valorEmpenhado: em.find("ValorEmpenhado").text().trim(),
-        valorPago: em.find("ValorPago").text().trim(),
-      });
-    });
-
-    // salvar
-    if (!fs.existsSync(BASE_PATH)) fs.mkdirSync(BASE_PATH, { recursive: true });
-
-    fs.writeFileSync(
-      `${BASE_PATH}${ano}.json`,
-      JSON.stringify(resultadoAno, null, 2)
-    );
-
-    console.log(`✅ EMENDAS ${ano} salvas.\n`);
+  // Carregar bigDB atual
+  let bigDB = {};
+  if (fs.existsSync(BIG_DB_PATH)) {
+    bigDB = JSON.parse(fs.readFileSync(BIG_DB_PATH));
   }
 
-  console.log("🟩 Coleta finalizada.\n");
+  // Loop dos anos solicitados
+  for (const ano of anos) {
+    console.log(`📘 Ano ${ano}`);
+    if (!bigDB[ano]) bigDB[ano] = {};
+
+    // Loop dos deputados
+    for (const dep of deputados) {
+      const nome = limparNome(dep.nomeCivil);
+      const depId = dep.id;
+
+      console.log(`🔎 Buscando: ${dep.nomeCivil}`);
+
+      let pagina = 1;
+      let acumulado = [];
+
+      while (true) {
+        const dados = await buscarPagina(ano, pagina, nome);
+        if (dados.length === 0) break;
+
+        acumulado = acumulado.concat(dados);
+        pagina++;
+
+        // Evitar rate limit
+        await new Promise(r => setTimeout(r, 150));
+      }
+
+      if (acumulado.length > 0) {
+        bigDB[ano][depId] = acumulado;
+        console.log(`   ✔ ${acumulado.length} emendas encontradas`);
+      } else {
+        console.log("   ❌ Nenhuma emenda");
+      }
+    }
+
+    console.log(`✅ Ano ${ano} finalizado.\n`);
+  }
+
+  // Salvar BigDatabase
+  if (!fs.existsSync(BASE_PATH)) fs.mkdirSync(BASE_PATH, { recursive: true });
+
+  fs.writeFileSync(BIG_DB_PATH, JSON.stringify(bigDB, null, 2));
+
+  console.log("🟩 FINALIZADO — BigDatabase salvo em:\n" + BIG_DB_PATH);
 }
 
 // =====================================================
-// FIM — COLETOR DE EMENDAS (SIGA — POST)
+// FIM — COLETOR EMENDAS (MODELO C)
 // =====================================================
