@@ -1,16 +1,21 @@
 // =====================================================
-// COLETOR DE SALÁRIOS — V4 (FUNCIONA COM index.js)
-// Fluxo:
-// 1. Lê big_servidores.json (coleta BRUTA)
-// 2. Coleta remuneração de cada CPF
-// 3. Salva big_remuneracao.json
-// 4. Gera salarios_final.json
+// COLETOR DE SALÁRIOS — V5 (AUTO-BRUTO, DEFINITIVO)
+// =====================================================
+// Fluxo inteligente:
+// 1. Se big_servidores.json NÃO existe → cria automaticamente
+// 2. Carrega os servidores
+// 3. Coleta remuneração CPF a CPF
+// 4. Gera big_remuneracao.json
+// 5. Gera salarios_final.json
 // =====================================================
 
 import fs from "fs";
 import fetch from "node-fetch";
+import { coletarServidoresBruto } from "./bruto_servidores.js";
 
-const BRUTO = "/home/folmdelima/transp_colletc/cache/bruto/big_servidores.json";
+const BRUTO_PATH = "/home/folmdelima/transp_colletc/cache/bruto/";
+const BRUTO_FILE = BRUTO_PATH + "big_servidores.json";
+
 const OUT_PATH = "/home/folmdelima/transp_colletc/cache/salarios/";
 const OUT_BIG_REMUN = OUT_PATH + "big_remuneracao.json";
 const OUT_FINAL = OUT_PATH + "salarios_final.json";
@@ -21,8 +26,12 @@ function delay(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
+// =====================================================
+// BUSCA REMUNERAÇÃO
+// =====================================================
 async function buscarRemuneracao(cpf) {
-  const url = `https://api.portaldatransparencia.gov.br/api-de-dados/servidores-remuneracao?cpf=${cpf}&pagina=1`;
+  const url =
+    `https://api.portaldatransparencia.gov.br/api-de-dados/servidores-remuneracao?cpf=${cpf}&pagina=1`;
 
   try {
     const res = await fetch(url, {
@@ -35,6 +44,7 @@ async function buscarRemuneracao(cpf) {
     if (!res.ok) return null;
 
     const json = await res.json();
+
     if (!Array.isArray(json) || json.length === 0) return null;
 
     return json[0];
@@ -45,34 +55,54 @@ async function buscarRemuneracao(cpf) {
 }
 
 // =====================================================
-// FUNÇÃO PRINCIPAL — export coletarSalarios()
+// FUNÇÃO PRINCIPAL
 // =====================================================
-
 export async function coletarSalarios() {
   console.clear();
-  console.log("💵 COLETANDO SALÁRIOS V4 (USANDO BRUTO)...\n");
+  console.log("💵 COLETANDO SALÁRIOS — V5 (AUTO-BRUTO)...\n");
 
-  if (!fs.existsSync(BRUTO)) {
-    console.log("❌ big_servidores.json não encontrado.");
-    return;
+  // -------------------------------------------------
+  // 1. SE O BRUTO NÃO EXISTE → GERAR AUTOMATICAMENTE
+  // -------------------------------------------------
+  if (!fs.existsSync(BRUTO_FILE)) {
+    console.log("⚠ big_servidores.json não encontrado!");
+    console.log("🔄 Iniciando coleta BRUTA automaticamente...\n");
+
+    await coletarServidoresBruto();
+
+    // Se ainda não existir → erro real
+    if (!fs.existsSync(BRUTO_FILE)) {
+      console.log("❌ ERRO FATAL: bruto não foi criado.");
+      return;
+    }
   }
 
+  // Criar pasta de saída
   if (!fs.existsSync(OUT_PATH)) {
     fs.mkdirSync(OUT_PATH, { recursive: true });
   }
 
-  const base = JSON.parse(fs.readFileSync(BRUTO));
-
+  // -------------------------------------------------
+  // 2. CARREGAR BRUTO
+  // -------------------------------------------------
+  const base = JSON.parse(fs.readFileSync(BRUTO_FILE));
   const cpfs = Object.keys(base);
+  const total = cpfs.length;
+
+  console.log(`📦 Servidores carregados: ${total}\n`);
+
   const bigRemun = {};
 
+  // -------------------------------------------------
+  // 3. COLETA CPF POR CPF
+  // -------------------------------------------------
   let i = 0;
 
   for (const cpf of cpfs) {
     i++;
 
     const servidor = base[cpf];
-    console.log(`📌 ${i}/${cpfs.length} — ${servidor.nome}`);
+    console.log(`📌 (${i}/${total}) — ${servidor.nome}`);
 
     const remun = await buscarRemuneracao(cpf);
 
@@ -80,21 +110,26 @@ export async function coletarSalarios() {
       ...servidor,
       remuneracao: remun
         ? {
-            bruto: remun.remuneracaoBruta || null,
-            liquido: remun.remuneracaoLiquida || null,
+            bruto: remun.remuneracaoBruta || 0,
+            liquido: remun.remuneracaoLiquida || 0,
           }
         : null,
     };
 
-    await delay(250);
+    await delay(300);
   }
 
+  // -------------------------------------------------
+  // 4. SALVAR BIG DE REMUNERAÇÃO
+  // -------------------------------------------------
   fs.writeFileSync(OUT_BIG_REMUN, JSON.stringify(bigRemun, null, 2));
 
-  console.log("\n💵 REMUNERAÇÃO COMPLETA SALVA EM:");
+  console.log("\n💾 big_remuneracao.json salvo em:");
   console.log(OUT_BIG_REMUN);
 
-  // Agora gerar salario_final.json — só um agrupado geral
+  // -------------------------------------------------
+  // 5. GERAR ARQUIVO FINAL AGRUPADO
+  // -------------------------------------------------
   const final = Object.values(bigRemun).map((s) => ({
     nome: s.nome,
     cpf: s.cpf,
@@ -105,12 +140,12 @@ export async function coletarSalarios() {
 
   fs.writeFileSync(OUT_FINAL, JSON.stringify(final, null, 2));
 
-  console.log("\n💰 ARQUIVO FINAL GERADO:");
+  console.log("\n💰 salarios_final.json GERADO!");
   console.log(OUT_FINAL);
 
-  console.log("\n💵 COLETA DE SALÁRIOS FINALIZADA!");
+  console.log("\n✅ COLETA DE SALÁRIOS FINALIZADA!");
 }
 
 // =====================================================
-// FIM — coletarSalarios()
+// FIM DO ARQUIVO DEFINITIVO
 // =====================================================
