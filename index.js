@@ -1,16 +1,43 @@
+// =====================================================
 // INÍCIO — MENU PRINCIPAL BR TRANSPARENTE
+// =====================================================
+
 import inquirer from "inquirer";
 
-import { coletarDeputados } from "./collector/deputados.js";
-import { coletarCEAP } from "./collector/ceap.js";
-import { coletarEmendas } from "./collector/emendas.js";
-import { coletarGabinete } from "./collector/gabinete.js";
-import { coletarSalarios } from "./collector/salarios.js";
-import { selecionarAnos } from "./collector/utils/anos.js";
-
 async function menu() {
-  // será preenchido depois
+  console.clear();
+  console.log("=======================================");
+  console.log("     BR TRANSPARENTE COLLECTOR");
+  console.log("=======================================\n");
+
+  const resposta = await inquirer.prompt([
+    {
+      type: "list",
+      name: "opcao",
+      message: "Selecione uma opção:",
+      choices: [
+        "Atualizar Deputados",
+        "Atualizar CEAP",
+        "Atualizar Emendas",
+        "Atualizar Gabinete",
+        "Atualizar Salários",
+        "Sair"
+      ]
+    }
+  ]);
+
+  console.log("\nVocê escolheu:", resposta.opcao, "\n");
+
+  if (resposta.opcao === "Sair") {
+    process.exit(0);
+  }
+
+  console.log("🚧 Módulo ainda não implementado.");
+  process.exit(0);
 }
 
 menu();
-// FIM
+
+// =====================================================
+// FIM — MENU PRINCIPAL BR TRANSPARENTE
+// =====================================================
